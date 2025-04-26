@@ -3,6 +3,10 @@ import logo from "/assets/openai-logomark.svg";
 import EventLog from "./EventLog";
 import SessionControls from "./SessionControls";
 import ToolPanel from "./ToolPanel";
+import Webcam from "./Webcam";
+import Timer from "./Timer";
+import LogDeletionControl from "./LogDeletionControl";
+import GeminiControl from "./GeminiControl";
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -10,6 +14,45 @@ export default function App() {
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+
+  // Function to update system prompt based on latest logs
+  const updateSystemPrompt = (latestLogs) => {
+    if (!latestLogs || latestLogs.length < 2) return;
+    
+    // Get the last two entries from the array
+    const lastTwoLogs = latestLogs.slice(-2);
+    const context = lastTwoLogs.map(log => {
+      // Extract the caption from the log entry
+      const caption = log.caption || '';
+      // Clean up the caption by removing markdown formatting
+      return caption.replace(/\*\*/g, '').replace(/\*/g, '');
+    }).join('\n\n');
+    
+    const systemPrompt = {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `You are a helpful AI assistant that provides conversational descriptions of what you see in images. Based on the latest image logs, you are currently seeing:
+
+            ${context}
+
+            Your role is to:
+            - Describe what you see in a natural, conversational way
+            - Update your understanding of the scene based on new image logs
+            - Engage in dialogue about the scene and its context
+            - Be observant of changes in the environment or person's state
+
+            Please maintain a friendly and engaging tone while describing the scene.`,
+          },
+        ],
+      },
+    };
+    sendClientEvent(systemPrompt);
+  };
 
   async function startSession() {
     // Get a session token for OpenAI Realtime API
@@ -49,6 +92,51 @@ export default function App() {
         "Content-Type": "application/sdp",
       },
     });
+
+    // Add system prompt to the session with dynamic image context
+    const systemPrompt = {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `You are a helpful AI assistant that provides conversational descriptions of what you see in images. Based on the latest image logs, you are currently seeing:
+
+1. A person in a library/study environment
+2. The person is wearing headphones
+3. The setting is a bright, open space or university atrium
+4. The person appears to be in a contemplative or focused state
+
+Your role is to:
+- Describe what you see in a natural, conversational way
+- Update your understanding of the scene based on new image logs
+- Engage in dialogue about the scene and its context
+- Be observant of changes in the environment or person's state
+
+Please maintain a friendly and engaging tone while describing the scene.`,
+          },
+        ],
+      },
+    };
+    sendClientEvent(systemPrompt);
+
+    // Make the LLM initiate the conversation
+    const initialMessage = {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "input_text",
+            text: "Hello! I can see you're in a study environment. Would you like me to describe what I'm seeing in more detail?",
+          },
+        ],
+      },
+    };
+    sendClientEvent(initialMessage);
 
     const answer = {
       type: "answer",
@@ -132,7 +220,14 @@ export default function App() {
           event.timestamp = new Date().toLocaleTimeString();
         }
 
-        setEvents((prev) => [event, ...prev]);
+        setEvents((prev) => {
+          const newEvents = [event, ...prev];
+          // Update system prompt when new logs are received
+          if (event.type === "log.update") {
+            updateSystemPrompt(newEvents);
+          }
+          return newEvents;
+        });
       });
 
       // Set session active when the data channel is opened
@@ -149,6 +244,9 @@ export default function App() {
         <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
           <img style={{ width: "24px" }} src={logo} />
           <h1>realtime console</h1>
+          <Timer isSessionActive={isSessionActive} />
+          <LogDeletionControl />
+          <GeminiControl />
         </div>
       </nav>
       <main className="absolute top-16 left-0 right-0 bottom-0">
@@ -168,12 +266,19 @@ export default function App() {
           </section>
         </section>
         <section className="absolute top-0 w-[380px] right-0 bottom-0 p-4 pt-0 overflow-y-auto">
-          <ToolPanel
-            sendClientEvent={sendClientEvent}
-            sendTextMessage={sendTextMessage}
-            events={events}
-            isSessionActive={isSessionActive}
-          />
+          <div className="flex flex-col h-full">
+            <div className="flex-1 mb-4">
+              <Webcam />
+            </div>
+            <div className="flex-1">
+              <ToolPanel
+                sendClientEvent={sendClientEvent}
+                sendTextMessage={sendTextMessage}
+                events={events}
+                isSessionActive={isSessionActive}
+              />
+            </div>
+          </div>
         </section>
       </main>
     </>
