@@ -4,16 +4,26 @@ import Button from "./Button";
 
 function SessionStopped({ startSession }) {
   const [isActivating, setIsActivating] = useState(false);
+  const [error, setError] = useState(null);
 
-  function handleStartSession() {
+  async function handleStartSession() {
     if (isActivating) return;
 
     setIsActivating(true);
-    startSession();
+    setError(null);
+    
+    try {
+      await startSession();
+    } catch (err) {
+      setError(err.message || "Failed to start session");
+      console.error("Session start error:", err);
+    } finally {
+      setIsActivating(false);
+    }
   }
 
   return (
-    <div className="flex items-center justify-center w-full h-full">
+    <div className="flex flex-col items-center justify-center w-full h-full gap-4">
       <Button
         onClick={handleStartSession}
         className={isActivating ? "bg-gray-600" : "bg-red-600"}
@@ -21,6 +31,11 @@ function SessionStopped({ startSession }) {
       >
         {isActivating ? "starting session..." : "start session"}
       </Button>
+      {error && (
+        <div className="text-red-500 text-sm text-center">
+          {error}
+        </div>
+      )}
     </div>
   );
 }
